@@ -6,6 +6,7 @@
 {% endif %}
 <div class="ui vertical grid">
   <div class="four column row">
+    <!--
     <div class="column">
       <a href="{{url_for('nodes', env=current_env, status='failed')}}">
         <h1 class="ui failed header no-margin-bottom">
@@ -33,6 +34,7 @@
       </a>
       <span>with status changed</span>
     </div>
+    -->
     <div class="column">
       <a href="{{url_for('nodes', env=current_env, status='unreported')}}">
         <h1 class="ui header unreported no-margin-bottom">
@@ -52,11 +54,11 @@
     </div>
     <div class="column">
       <h1 class="ui header darkblue no-margin-bottom">{{metrics['num_resources']}}</h1>
-      <span>Resources managed</span>
+      <span>Recipes</span>
     </div>
     <div class="column">
       <h1 class="ui header darkblue no-margin-bottom">{{metrics['avg_resources_node']}}</h1>
-      <span>Avg. resources/node</span>
+      <span>Avg. recipes/node</span>
     </div>
   </div>
   <div class="ui divider"></div>

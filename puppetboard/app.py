@@ -16,12 +16,10 @@ from flask import (
     request, session
 )
 
-from pypuppetdb import connect
-from pypuppetdb.QueryBuilder import *
+import psycopg2
 
 from puppetboard.forms import (CatalogForm, QueryForm)
 from puppetboard.utils import (
-    get_or_abort, yield_or_stop,
     jsonprint, prettyprint, Pagination
 )
 
@@ -33,18 +31,19 @@ app.config.from_object('puppetboard.default_settings')
 graph_facts = app.config['GRAPH_FACTS']
 app.config.from_envvar('PUPPETBOARD_SETTINGS', silent=True)
 graph_facts += app.config['GRAPH_FACTS']
-app.secret_key = app.config['SECRET_KEY']
 
 app.jinja_env.filters['jsonprint'] = jsonprint
 app.jinja_env.filters['prettyprint'] = prettyprint
 
-puppetdb = connect(
-    host=app.config['PUPPETDB_HOST'],
-    port=app.config['PUPPETDB_PORT'],
-    ssl_verify=app.config['PUPPETDB_SSL_VERIFY'],
-    ssl_key=app.config['PUPPETDB_KEY'],
-    ssl_cert=app.config['PUPPETDB_CERT'],
-    timeout=app.config['PUPPETDB_TIMEOUT'],)
+chefdbconn = psycopg2.connect((
+    "host={host} port={port} user={user} "
+    "password={password} dbname={dbname}").format(
+        host=app.config['CHEFDB_HOST'],
+        port=app.config['CHEFDB_PORT'],
+        user=app.config['CHEFDB_USER'],
+        password=app.config['CHEFDB_PASSWORD'],
+        dbname=app.config['CHEFDB_DBNAME']))
+chefdb = chefdbconn.cursor()
 
 numeric_level = getattr(logging, app.config['LOGLEVEL'].upper(), None)
 if not isinstance(numeric_level, int):
@@ -69,12 +68,11 @@ def url_for_field(field, value):
 
 
 def environments():
-    envs = get_or_abort(puppetdb.environments)
+    chefdb.execute("select distinct environment from nodes")
+    envs = chefdb.fetchall()
     x = []
-
     for env in envs:
-        x.append(env['name'])
-
+        x.append(env[0])
     return x
 
 
@@ -89,7 +87,7 @@ app.jinja_env.globals['url_for_field'] = url_for_field
 def utility_processor():
     def now(format='%m/%d/%Y %H:%M:%S'):
         """returns the formated datetime"""
-        return datetime.datetime.now().strftime(format)
+        return datetime.now().strftime(format)
     return dict(now=now)
 
 
@@ -125,7 +123,7 @@ def server_error(e):
     return render_template('500.html', envs=envs), 500
 
 
-@app.route('/', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/', defaults={'env': '*'})
 @app.route('/<env>/')
 def index(env):
     """This view generates the index page and displays a set of metrics and
@@ -140,96 +138,71 @@ def index(env):
         'num_resources': 0,
         'avg_resources_node': 0}
     check_env(env, envs)
+    stats = {
+        'unreported': 0
+    }
+    unresponse_secs = app.config['UNRESPONSIVE_HOURS'] * 3600
 
     if env == '*':
-        query = app.config['OVERVIEW_FILTER']
-
-        prefix = 'puppetlabs.puppetdb.population'
-        num_nodes = get_or_abort(
-            puppetdb.metric,
-            "{0}{1}".format(prefix, ':name=num-nodes'))
-        num_resources = get_or_abort(
-            puppetdb.metric,
-            "{0}{1}".format(prefix, ':name=num-resources'))
-        avg_resources_node = get_or_abort(
-            puppetdb.metric,
-            "{0}{1}".format(prefix, ':name=avg-resources-per-node'))
-        metrics['num_nodes'] = num_nodes['Value']
-        metrics['num_resources'] = num_resources['Value']
-        metrics['avg_resources_node'] = "{0:10.0f}".format(
-            avg_resources_node['Value'])
+        chefdb.execute('select count(*) from nodes')
+        num_nodes = int(chefdb.fetchone()[0])
+        chefdb.execute(
+                "select count(*) from "
+                "(select distinct jsonb_array_elements(data->'recipes') "
+                "from nodes) as res")
+        num_resources = int(chefdb.fetchone()[0])
+        chefdb.execute(
+                "select avg(c) from "
+                "(select jsonb_array_length(data->'recipes') as c from nodes) "
+                "as average")
+        avg_resources_node = int(chefdb.fetchone()[0])
+        metrics['num_nodes'] = num_nodes
+        metrics['num_resources'] = num_resources
+        metrics['avg_resources_node'] = avg_resources_node
+        chefdb.execute(
+                "select data->>'fqdn' as name from nodes where "
+                "(extract(epoch from now()) - "
+                "(data->>'ohai_time')::float) > {0}".format(unresponse_secs))
+        unpresponsive = [i[0] for i in chefdb.fetchall()]
     else:
-        query = AndOperator()
-        query.add(EqualsOperator('catalog_environment', env))
-        query.add(EqualsOperator('facts_environment', env))
+        chefdb.execute(
+                "select count(*) from nodes where environment='{0}'".format(env))
+        num_nodes = int(chefdb.fetchone()[0])
+        chefdb.execute(
+                "select count(*) from "
+                "(select distinct jsonb_array_elements(data->'recipes') "
+                "from nodes where environment='{0}') as res".format(env))
+        num_resources = int(chefdb.fetchone()[0])
+        metrics['num_nodes'] = num_nodes
+        metrics['num_resources'] = num_resources
+        chefdb.execute(
+                "select avg(c) from "
+                "(select jsonb_array_length(data->'recipes') as c from nodes "
+                "where environment='{0}') as average".format(env))
+        avg_resources_node = int(chefdb.fetchone()[0])
+        metrics['avg_resources_node'] = avg_resources_node
+        chefdb.execute(
+                "select data->>'fqdn' as name from nodes where "
+                "(extract(epoch from now()) - "
+                "(data->>'ohai_time')::float) > {0} "
+                "and environment='{1}'".format(
+                    unresponse_secs,
+                    env))
+        unpresponsive = [i[0] for i in chefdb.fetchall()]
 
-        num_nodes_query = ExtractOperator()
-        num_nodes_query.add_field(FunctionOperator('count'))
-        num_nodes_query.add_query(query)
-
-        if app.config['OVERVIEW_FILTER'] != None:
-            query.add(app.config['OVERVIEW_FILTER'])
-
-        num_resources_query = ExtractOperator()
-        num_resources_query.add_field(FunctionOperator('count'))
-        num_resources_query.add_query(EqualsOperator("environment", env))
-
-        num_nodes = get_or_abort(
-            puppetdb._query,
-            'nodes',
-            query=num_nodes_query)
-        num_resources = get_or_abort(
-            puppetdb._query,
-            'resources',
-            query=num_resources_query)
-        metrics['num_nodes'] = num_nodes[0]['count']
-        metrics['num_resources'] = num_resources[0]['count']
-        try:
-            metrics['avg_resources_node'] = "{0:10.0f}".format(
-                (num_resources[0]['count'] / num_nodes[0]['count']))
-        except ZeroDivisionError:
-            metrics['avg_resources_node'] = 0
-
-    nodes = get_or_abort(puppetdb.nodes,
-                         query=query,
-                         unreported=app.config['UNRESPONSIVE_HOURS'],
-                         with_status=True)
-
-    nodes_overview = []
-    stats = {
-        'changed': 0,
-        'unchanged': 0,
-        'failed': 0,
-        'unreported': 0,
-        'noop': 0
-    }
-
-    for node in nodes:
-        if node.status == 'unreported':
-            stats['unreported'] += 1
-        elif node.status == 'changed':
-            stats['changed'] += 1
-        elif node.status == 'failed':
-            stats['failed'] += 1
-        elif node.status == 'noop':
-            stats['noop'] += 1
-        else:
-            stats['unchanged'] += 1
-
-        if node.status != 'unchanged':
-            nodes_overview.append(node)
+    stats['unreported'] = len(unpresponsive)
 
     return render_template(
         'index.html',
         metrics=metrics,
-        nodes=nodes_overview,
+        nodes=[],
         stats=stats,
         envs=envs,
         current_env=env
     )
 
 
-@app.route('/nodes', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/nodes', defaults={'env': '*'})
 @app.route('/<env>/nodes')
 def nodes(env):
     """Fetch all (active) nodes from PuppetDB and stream a table displaying
@@ -289,7 +262,7 @@ def nodes(env):
                         current_env=env)))
 
 
-@app.route('/inventory', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/inventory', defaults={'env': '*'})
 @app.route('/<env>/inventory')
 def inventory(env):
     """Fetch all (active) nodes from PuppetDB and stream a table displaying
@@ -367,7 +340,7 @@ def inventory(env):
 
 
 @app.route('/node/<node_name>',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/node/<node_name>')
 def node(env, node_name):
     """Display a dashboard for a node showing as much data as we have on that
@@ -431,7 +404,7 @@ def node(env, node_name):
 
 
 @app.route('/reports/',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT'], 'page': 1})
+           defaults={'env': '*', 'page': 1})
 @app.route('/<env>/reports/', defaults={'page': 1})
 @app.route('/<env>/reports/page/<int:page>')
 def reports(env, page):
@@ -524,7 +497,7 @@ def reports(env, page):
 
 
 @app.route('/reports/<node_name>/',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT'], 'page': 1})
+           defaults={'env': '*', 'page': 1})
 @app.route('/<env>/reports/<node_name>', defaults={'page': 1})
 @app.route('/<env>/reports/<node_name>/page/<int:page>')
 def reports_node(env, node_name, page):
@@ -621,7 +594,7 @@ def reports_node(env, node_name, page):
 
 
 @app.route('/report/<node_name>/<report_id>',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/report/<node_name>/<report_id>')
 def report(env, node_name, report_id):
     """Displays a single report including all the events associated with that
@@ -670,7 +643,7 @@ def report(env, node_name, report_id):
         current_env=env)
 
 
-@app.route('/facts', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/facts', defaults={'env': '*'})
 @app.route('/<env>/facts')
 def facts(env):
     """Displays an alphabetical list of all facts currently known to
@@ -700,7 +673,7 @@ def facts(env):
                            current_env=env)
 
 
-@app.route('/fact/<fact>', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/fact/<fact>', defaults={'env': '*'})
 @app.route('/<env>/fact/<fact>')
 def fact(env, fact):
     """Fetches the specific fact from PuppetDB and displays its value per
@@ -737,7 +710,7 @@ def fact(env, fact):
 
 
 @app.route('/fact/<fact>/<value>',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/fact/<fact>/<value>')
 def fact_value(env, fact, value):
     """On asking for fact/value get all nodes with that fact.
@@ -772,7 +745,7 @@ def fact_value(env, fact, value):
 
 
 @app.route('/query', methods=('GET', 'POST'),
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/query', methods=('GET', 'POST'))
 def query(env):
     """Allows to execute raw, user created querries against PuppetDB. This is
@@ -817,7 +790,7 @@ def query(env):
         abort(403)
 
 
-@app.route('/metrics', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/metrics', defaults={'env': '*'})
 @app.route('/<env>/metrics')
 def metrics(env):
     """Lists all available metrics that PuppetDB is aware of.
@@ -837,7 +810,7 @@ def metrics(env):
 
 
 @app.route('/metric/<metric>',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/metric/<metric>')
 def metric(env, metric):
     """Lists all information about the metric of the given name.
@@ -859,7 +832,7 @@ def metric(env, metric):
         current_env=env)
 
 
-@app.route('/catalogs', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/catalogs', defaults={'env': '*'})
 @app.route('/<env>/catalogs')
 def catalogs(env):
     """Lists all nodes with a compiled catalog.
@@ -919,7 +892,7 @@ def catalogs(env):
 
 
 @app.route('/catalog/<node_name>',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/catalog/<node_name>')
 def catalog_node(env, node_name):
     """Fetches from PuppetDB the compiled catalog of a given node.
@@ -943,7 +916,7 @@ def catalog_node(env, node_name):
 
 
 @app.route('/catalog/submit', methods=['POST'],
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/catalog/submit', methods=['POST'])
 def catalog_submit(env):
     """Receives the submitted form data from the catalogs page and directs
@@ -977,7 +950,7 @@ def catalog_submit(env):
 
 
 @app.route('/catalogs/compare/<compare>...<against>',
-           defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+           defaults={'env': '*'})
 @app.route('/<env>/catalogs/compare/<compare>...<against>')
 def catalog_compare(env, compare, against):
     """Compares the catalog of one node, parameter compare, with that of
@@ -1005,7 +978,7 @@ def catalog_compare(env, compare, against):
         abort(403)
 
 
-@app.route('/radiator', defaults={'env': app.config['DEFAULT_ENVIRONMENT']})
+@app.route('/radiator', defaults={'env': '*'})
 @app.route('/<env>/radiator')
 def radiator(env):
     """This view generates a simplified monitoring page

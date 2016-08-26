@@ -1,13 +1,11 @@
 import os
 
-PUPPETDB_HOST = 'localhost'
-PUPPETDB_PORT = 8080
-PUPPETDB_SSL_VERIFY = True
-PUPPETDB_KEY = None
-PUPPETDB_CERT = None
-PUPPETDB_TIMEOUT = 20
-DEFAULT_ENVIRONMENT = 'production'
-SECRET_KEY = os.urandom(24)
+CHEFDB_HOST = 'localhost'
+CHEFDB_PORT = 5432
+CHEFDB_USER = 'chef'
+CHEFDB_PASSWORD = 'password'
+CHEFDB_DBNAME = 'chef'
+
 DEV_LISTEN_HOST = '127.0.0.1'
 DEV_LISTEN_PORT = 5000
 DEV_COFFEE_LOCATION = 'coffee'
@@ -18,7 +16,6 @@ LOGLEVEL = 'info'
 REPORTS_COUNT = 10
 OFFLINE_MODE = False
 ENABLE_CATALOG = False
-OVERVIEW_FILTER = None
 GRAPH_FACTS = ['architecture',
                'clientversion',
                'domain',

@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Puppetboard</title>
+    <title>Chefboard</title>
     {% if config.OFFLINE_MODE %}
     <style>
       @font-face {
@@ -22,7 +22,7 @@
   <body>
     <div class="ui darkblue doubling stackable inverted large menu">
       <div class="title item">
-        Puppetboard
+        Chefboard
       </div>
       {%- for endpoint, caption in [
       ('index', 'Overview'),
@@ -62,11 +62,13 @@
       <i class="large arrow up icon"></i>
     </div>
 
+    <!--
     <footer class="ui absolute fixed bottom">
       <div>
         Copyright &copy; 2013-{{ now('%Y') }} <a href="https://github.com/voxpupuli" target="_blank">Puppet Community</a>. <span style="float:right">Live from PuppetDB.</span>
       </div>
     </footer>
+    -->
 
     {% if config.OFFLINE_MODE %}
     <script src="{{ url_for('static', filename='jquery-2.1.1/jquery.min.js') }}"></script>

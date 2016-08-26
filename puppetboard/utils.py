@@ -5,9 +5,6 @@ import json
 import logging
 
 from math import ceil
-from requests.exceptions import HTTPError, ConnectionError
-from pypuppetdb.errors import EmptyResponseError
-
 from flask import abort
 
 
@@ -55,25 +52,6 @@ def prettyprint(value):
 
     html += "</tbody></table>"
     return(html)
-
-
-def get_or_abort(func, *args, **kwargs):
-    """Execute the function with its arguments and handle the possible
-    errors that might occur.
-
-    In this case, if we get an exception we simply abort the request.
-    """
-    try:
-        return func(*args, **kwargs)
-    except HTTPError as e:
-        log.error(str(e))
-        abort(e.response.status_code)
-    except ConnectionError as e:
-        log.error(str(e))
-        abort(500)
-    except EmptyResponseError as e:
-        log.error(str(e))
-        abort(204)
 
 
 def yield_or_stop(generator):
