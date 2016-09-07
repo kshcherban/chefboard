@@ -8,6 +8,7 @@ try:
 except ImportError:
     from urllib.parse import unquote
 from datetime import datetime, timedelta
+from dateutil.relativedelta import relativedelta
 from itertools import tee
 
 from flask import (
@@ -143,6 +144,15 @@ def index(env):
     }
     unresponse_secs = app.config['UNRESPONSIVE_HOURS'] * 3600
 
+    def _hr_time_delta(timestamp):
+        delta = relativedelta(
+                datetime.now(),
+                datetime.fromtimestamp(float(timestamp)))
+        attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
+        delta_arr = ['%d %s' % (getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1])
+            for attr in attrs if getattr(delta, attr)]
+        return ' '.join(delta_arr)
+
     if env == '*':
         chefdb.execute('select count(*) from nodes')
         num_nodes = int(chefdb.fetchone()[0])
@@ -160,10 +170,14 @@ def index(env):
         metrics['num_resources'] = num_resources
         metrics['avg_resources_node'] = avg_resources_node
         chefdb.execute(
-                "select data->>'fqdn' as name from nodes where "
-                "(extract(epoch from now()) - "
+                "select data->>'fqdn' as name, data->>'ohai_time' as time "
+                "from nodes where (extract(epoch from now()) - "
                 "(data->>'ohai_time')::float) > {0}".format(unresponse_secs))
-        unpresponsive = [i[0] for i in chefdb.fetchall()]
+        unpresponsive = {
+                n[0]: {
+                    'unreported': _hr_time_delta(n[1]),
+                    'time': datetime.fromtimestamp(float(n[1])).isoformat()}
+                for n in chefdb.fetchall()}
     else:
         chefdb.execute(
                 "select count(*) from nodes where environment='{0}'".format(env))
@@ -182,20 +196,22 @@ def index(env):
         avg_resources_node = int(chefdb.fetchone()[0])
         metrics['avg_resources_node'] = avg_resources_node
         chefdb.execute(
-                "select data->>'fqdn' as name from nodes where "
-                "(extract(epoch from now()) - "
+                "select data->>'fqdn' as name, data->>'ohai_time' as time "
+                "from nodes where (extract(epoch from now()) - "
                 "(data->>'ohai_time')::float) > {0} "
                 "and environment='{1}'".format(
                     unresponse_secs,
                     env))
-        unpresponsive = [i[0] for i in chefdb.fetchall()]
+        unpresponsive = {
+                n[0]:datetime.fromtimestamp(float(n[1])).isoformat()
+                for n in chefdb.fetchall()}
 
     stats['unreported'] = len(unpresponsive)
 
     return render_template(
         'index.html',
         metrics=metrics,
-        nodes=[],
+        nodes=unpresponsive,
         stats=stats,
         envs=envs,
         current_env=env

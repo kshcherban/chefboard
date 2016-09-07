@@ -77,32 +77,18 @@
         </thead>
         <tbody>
           {% for node in nodes %}
-          {% if node.status != 'unchanged' %}
           <tr>
             <td>
-              {% if node.latest_report_hash %}
-                {{macros.status_counts(status=node.status, node_name=node.name, events=node.events, unreported_time=node.unreported_time, current_env=current_env, report_hash=node.latest_report_hash)}}
-              {% else %}
-                {{macros.status_counts(status=node.status, node_name=node.name, events=node.events, unreported_time=node.unreported_time, current_env=current_env)}}
-              {% endif %}
+            {{macros.status_counts(status='unreported', node_name=node, events='', unreported_time=nodes[node]['unreported'], current_env=current_env)}}
             </td>
             <td>
-              <a href="{{url_for('node', env=current_env, node_name=node.name)}}">{{ node.name }}</a>
+              <a href="{{url_for('node', env=current_env, node_name=node)}}">{{ node }}</a>
+            </td>
+            <td><a rel='utctimestamp'>{{ nodes[node]['time'] }}</a>
             </td>
             <td>
-              {% if node.report_timestamp %}
-                <a href="{{url_for('report', env=current_env, node_name=node.name, report_id=node.latest_report_hash)}}" rel='utctimestamp'>{{ node.report_timestamp }}</a>
-              {% else %}
-                <i class="large ban icon"></i>
-              {% endif %}
-            </td>
-            <td>
-              {% if node.report_timestamp %}
-              <a title='Reports' href="{{url_for('reports_node', env=current_env, node_name=node.name)}}"><i class='large darkblue book icon'></i></a>
-              {% endif %}
             </td>
           </tr>
-          {% endif %}
           {% endfor %}
         </tbody>
       </table>
