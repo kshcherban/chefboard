@@ -66,13 +66,12 @@
     <div class="column">
       {% if nodes %}
       <h2>Nodes status detail ({{nodes|length}})</h2>
-      <table class='ui sortable very compact very basic table'>
+      <table class='ui very compact very basic table tablesorter'>
         <thead>
           <tr>
             <th class="five wide">Status</th>
             <th class="five wide">Hostname</th>
-            <th class="five wide date default-sort">Report</th>
-            <th class="one wide"></th>
+            <th class="five wide">Report</th>
           </tr>
         </thead>
         <tbody>
@@ -83,11 +82,7 @@
             </td>
             <td>
               <a href="{{url_for('node', env=current_env, node_name=node)}}">{{ node }}</a>
-            </td>
-            <td><a rel='utctimestamp'>{{ nodes[node]['time'] }}</a>
-            </td>
-            <td>
-            </td>
+              <td><a rel="utctimestamp">{{ nodes[node]['time'] }}</a></td>
           </tr>
           {% endfor %}
         </tbody>

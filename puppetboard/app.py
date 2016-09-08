@@ -148,7 +148,7 @@ def index(env):
         delta = relativedelta(
                 datetime.now(),
                 datetime.fromtimestamp(float(timestamp)))
-        attrs = ['years', 'months', 'days', 'hours', 'minutes', 'seconds']
+        attrs = ['years', 'months', 'days', 'hours', 'minutes']
         delta_arr = ['%d %s' % (getattr(delta, attr), getattr(delta, attr) > 1 and attr or attr[:-1])
             for attr in attrs if getattr(delta, attr)]
         return ' '.join(delta_arr)
@@ -176,7 +176,8 @@ def index(env):
         unpresponsive = {
                 n[0]: {
                     'unreported': _hr_time_delta(n[1]),
-                    'time': datetime.fromtimestamp(float(n[1])).isoformat()}
+                    'time': datetime.strftime(
+                        datetime.fromtimestamp(float(n[1])), '%x %X')}
                 for n in chefdb.fetchall()}
     else:
         chefdb.execute(
@@ -203,7 +204,10 @@ def index(env):
                     unresponse_secs,
                     env))
         unpresponsive = {
-                n[0]:datetime.fromtimestamp(float(n[1])).isoformat()
+                n[0]: {
+                    'unreported': _hr_time_delta(n[1]),
+                    'time': datetime.strftime(
+                        datetime.fromtimestamp(float(n[1])), '%x %X')}
                 for n in chefdb.fetchall()}
 
     stats['unreported'] = len(unpresponsive)

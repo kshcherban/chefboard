@@ -50,8 +50,12 @@ th.tablesorter-headerDesc::after {
 }
 
 .ui.label.status {
-  color: white;
-  text-shadow: 0 0 1px;
+  color: #4183c4;
+/*  text-shadow: 0 0 1px; */
+}
+
+.ui.label.time {
+  width: 20.2em;
 }
 
 .ui.header.failed, .ui.line.failed {
@@ -75,6 +79,7 @@ th.tablesorter-headerDesc::after {
 }
 
 .ui.label.unreported {
+  color: black;
   background-color: #3D96AE;
 }
 
